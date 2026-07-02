@@ -253,6 +253,238 @@ class ZeppClient:
                         print(f"    {nap_start} → {nap_end}  ({nap_dur}m)")
             print()
 
+    def _last_n_days_ms(self, days: int = 7):
+        """Build from/to timestamps in ms for 'last N days', ending now.
+
+        Anchored to local midnight of (today - (days-1)) rather than a
+        rolling "now minus N days" window, so the oldest day is fully
+        included regardless of what time the script runs (a rolling window
+        can cut off early-morning events on the Nth day back).
+        """
+        now = datetime.now()
+        to_ts = int(now.timestamp() * 1000)
+        from_day = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+        from_ts = int(from_day.timestamp() * 1000)
+        return from_ts, to_ts
+
+    def fetch_wake_hybridcharge(self, from_ts: int = None, to_ts: int = None, days: int = 7):
+        """Fetch Wake HybridCharge samples.
+
+        Confirmed mapping (CLAUDE.md, "Wake HybridCharge (CONFIRMED)"):
+        GET /v2/users/me/events, eventType=Charge, subType=wake_data.
+        wakeCharge is the primary score but is absent on some samples
+        (e.g. earliest records only have mentalWake/physicalWake) — those
+        are skipped, not treated as errors.
+
+        The API filters on item.timestamp, but item.timestamp runs ~22h
+        behind value.startTime (the field we actually bucket by for the
+        display date). When defaulting the range, pad `from` by one extra
+        day so the oldest requested day's item isn't excluded, then filter
+        the parsed records back down to exactly `days` by startTime.
+        Explicit from_ts/to_ts are used as-is, no padding or filtering.
+
+        Args:
+            from_ts: range start, ms since epoch (defaults to `days` days ago)
+            to_ts:   range end, ms since epoch (defaults to now)
+            days:    size of the default range in calendar days (ignored if
+                     from_ts/to_ts are both given)
+        """
+        explicit_range = from_ts is not None and to_ts is not None
+        if not explicit_range:
+            padded_from, default_to = self._last_n_days_ms(days=days + 1)
+            if from_ts is None:
+                from_ts = padded_from
+            if to_ts is None:
+                to_ts = default_to
+
+        url = f"{self.base_url}/v2/users/me/events"
+        headers = {
+            "apptoken": self.app_token,
+            "appname": "com.huami.midong",
+            "appplatform": "android_phone",
+            "Content-Type": "application/json",
+        }
+        params = {
+            "eventType": "Charge",
+            "subType": "wake_data",
+            "from": from_ts,
+            "to": to_ts,
+            "limit": 200,
+            "reverse": "true",
+        }
+        resp = requests.get(url, headers=headers, params=params)
+        if resp.status_code == 401:
+            raise RuntimeError(
+                "Zepp apptoken expired or invalid (401). Redo the emulator "
+                "capture ritual: log into the Zepp app, grab a fresh apptoken "
+                "via HTTP Toolkit, and update APP_TOKEN in .env."
+            )
+        resp.raise_for_status()
+
+        items = resp.json().get("items", [])
+        records = []
+        for item in items:
+            item_timestamp = item.get("timestamp")
+            value = item.get("value", {})
+            start_time = value.get("startTime")
+            for sample in value.get("samples", []):
+                if "wakeCharge" not in sample:
+                    # Not every sample has the primary score (e.g. earliest
+                    # history only has mentalWake/physicalWake) — skip, don't crash.
+                    continue
+                records.append({
+                    "item_timestamp": item_timestamp,
+                    "start_time": start_time,
+                    "wake_charge": sample.get("wakeCharge"),
+                    "mental_wake": sample.get("mentalWake"),
+                    "physical_wake": sample.get("physicalWake"),
+                    "exertion_score": sample.get("exertionScore"),
+                    "daily_fitness_score": sample.get("dailyFitnessScore"),
+                    "chronic_weight_daily": sample.get("chronicWeightDaily"),
+                    "algo_version": sample.get("algoVersion"),
+                })
+
+        if not explicit_range:
+            cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+            cutoff_ts = int(cutoff.timestamp() * 1000)
+            records = [r for r in records if (r["start_time"] or 0) >= cutoff_ts]
+
+        return records
+
+    def decode_hybridcharge(self, from_ts: int = None, to_ts: int = None):
+        """Print date: wakeCharge for the given range (defaults to last 7 days)."""
+        records = self.fetch_wake_hybridcharge(from_ts=from_ts, to_ts=to_ts)
+
+        print(f"{'='*50}")
+        print("Wake HybridCharge")
+        print(f"{'─'*50}")
+        if not records:
+            print("  No HybridCharge samples with wakeCharge found in range.")
+            return records
+
+        for rec in records:
+            ts = rec["start_time"] or rec["item_timestamp"]
+            day = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else "unknown"
+            print(f"  {day}: {rec['wake_charge']}")
+        print()
+        return records
+
+    def probe_sleep_subtypes(self):
+        import time
+        from datetime import datetime, timedelta
+
+        headers = {
+            "apptoken": self.app_token,
+            "appname": "com.huami.midong",
+            "appplatform": "android_phone",
+            "Content-Type": "application/json",
+        }
+
+        from_ts, to_ts = self._last_n_days_ms(days=7)
+
+        candidates = [
+            # From HTTP Toolkit observed subtypes
+            ("blood_oxygen", "odi"),
+            ("blood_oxygen", "spo2"),
+            ("blood_oxygen", "sleep_spo2"),
+            ("SleepBreath", "breathing_quality"),
+            ("SleepBreath", "respiratory_rate"),
+            ("SleepBreath", "hypopnea"),
+            ("sleepBreath", "breathing_quality"),
+            ("sleepBreath", "respiratory_rate"),
+            ("sleepBreathing", "respiratory_rate"),
+            ("sleepBreathing", "hypopnea"),
+            ("Sleep", "breath"),
+            ("Sleep", "br"),
+            ("SleepMonitor", "respiratory_rate"),
+            ("SleepMonitor", "hypopnea"),
+            ("SleepMonitor", "breathing_quality"),
+            ("HealthMonitor", "respiratory_rate"),
+            ("HealthMonitor", "hypopnea"),
+            ("phn", "sleep_breath"),
+            ("phn", "sleep_br"),
+            ("phn", "sleep_breathing"),
+        ]
+
+        for event_type, sub_type in candidates:
+            url = f"{self.base_url}/v2/users/me/events"
+            params = {
+                "limit": 10,
+                "eventType": event_type,
+                "subType": sub_type,
+                "from": from_ts,
+                "to": to_ts,
+                "reverse": "true",
+            }
+            resp = requests.get(url, headers=headers, params=params)
+            items = resp.json().get("items", [])
+            count = len(items)
+            print(f"[{resp.status_code}] eventType={event_type} subType={sub_type} → {count} items")
+            if count > 0:
+                print(f"  First item keys: {list(items[0].keys())}")
+                if "value" in items[0]:
+                    val = items[0]["value"]
+                    print(f"  Value: {val if not isinstance(val, dict) else list(val.keys())}")
+            time.sleep(0.2)
+
+        # Also probe dateString endpoint with different eventTypes
+        date_string_candidates = [
+            ("blood_oxygen", "odi"),
+            ("blood_oxygen", "respiratory_rate"),
+            ("blood_oxygen", "breathing_quality"),
+            ("SleepBreathing", "odi"),
+            ("SleepBreathing", "respiratory_rate"),
+            ("Sleep", "respiratory_rate"),
+            ("Sleep", "regularity"),
+        ]
+
+        print("\n--- Probing /users/{userid}/events/dateString ---")
+        for event_type, sub_type in date_string_candidates:
+            url = f"{self.base_url}/users/{self.user_id}/events/dateString"
+            params = {
+                "limit": 10,
+                "eventType": event_type,
+                "subType": sub_type,
+                "from": from_ts,
+                "to": to_ts,
+                "timezone": "Europe/Lisbon",
+                "reverse": "true",
+            }
+            resp = requests.get(url, headers=headers, params=params)
+            items = resp.json().get("items", [])
+            count = len(items)
+            print(f"[{resp.status_code}] eventType={event_type} subType={sub_type} → {count} items")
+            if count > 0:
+                print(f"  First item keys: {list(items[0].keys())}")
+                if "value" in items[0]:
+                    val = items[0]["value"]
+                    print(f"  Value: {val if not isinstance(val, dict) else list(val.keys())}")
+            time.sleep(0.2)
+
+    def probe_sec_hr(self):
+        import zipfile
+        import io
+
+        # Direct S3 URLs seen in Firebase performance log
+        from datetime import date, timedelta
+        dates = [(date.today() - timedelta(days=i)).isoformat() for i in range(7)]
+
+        for d in dates:
+            url = f"https://s3.eu-central-1.amazonaws.com/huami-de/SEC_HR/com.xiaomi.hm.health/{self.user_id}/{d}.zip"
+            resp = requests.get(url)
+            print(f"[{resp.status_code}] {d} → {len(resp.content)} bytes")
+            if resp.status_code == 200:
+                try:
+                    z = zipfile.ZipFile(io.BytesIO(resp.content))
+                    print(f"  Files in zip: {z.namelist()}")
+                    for name in z.namelist():
+                        data = z.read(name)
+                        print(f"  {name}: {len(data)} bytes")
+                        print(f"  First 200 bytes (hex): {data[:200].hex()}")
+                        print(f"  First 200 bytes (text attempt): {data[:200]}")
+                except Exception as e:
+                    print(f"  Error reading zip: {e}")
+
     def fetch_raw(self):
         url = (
             "https://api-mifit-de2.zepp.com/v1/data/band_data.json"
@@ -273,3 +505,4 @@ class ZeppClient:
 if __name__ == "__main__":
     client = ZeppClient()
     client.decode_sleep()
+    client.decode_hybridcharge()
