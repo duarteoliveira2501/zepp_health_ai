@@ -57,6 +57,19 @@ Supabase MCP + Claude.
 
 ## Confirmed Field Mappings
 
+**Known gap list (updated 2026-07-02):**
+- **HRV** — confirmed to exist server-side (Zepp's official partner API
+  exposes it to sanctioned integrations like Intervals.icu), but no
+  client-fetch path has been found via the mobile app's endpoints yet.
+  Official-partner-API access is noted as a possible future option, not an
+  active task. See "Heart Rate Variability (HRV) — NOT YET FOUND" below.
+- **Respiratory rate / hypopnea** — still fully uncharted. No leads from
+  community projects, forums, or official partner integrations. See
+  "Uncharted — require emulator session" below.
+- **Sleep regularity %** — reclassified as not a real extractable metric
+  (it's a user-configured setting, not a reported score). Removed from the
+  active backlog. See "Not a retrievable metric — reclassified" below.
+
 ### Sleep (`query_type=detail` endpoint family)
 - `ss` — sleep score
 - `dp` — deep sleep
@@ -130,10 +143,55 @@ Supabase MCP + Claude.
   2026-07-02.
 - `m4ary/zepp-health-cli` guesses: `hrv_sdnn`/`real_data` (unverified),
   `HRVRMSSD`/`real_data` (unverified).
-- Next step: isolate by clearing HTTP Toolkit log, tapping directly into the
-  "HEART RATE VARIABILITY (ms)" detail screen (the ">" arrow), and inspecting
-  fresh traffic. May use a dedicated endpoint outside the generic `events` path,
-  similar to how `heartRate` and `band_data.json` are special-cased for HR.
+
+**Confirmed negative results (live emulator + HTTP Toolkit session, 2026-07-02):**
+- Tapping into the HRV detail screen (D/W/M/Y tabs, scrolling) fires ZERO
+  dedicated API requests. Confirmed twice: once on an already-open/warm
+  session, once on a fresh cold-start session opening HRV for the first time.
+  The screen renders without any new network call.
+- Confirmed via `debug_raw_slp.py` that HRV is NOT present anywhere in the
+  sleep-summary `slp` dict (full unfiltered dump checked for 2026-07-02, no
+  38ms value found anywhere). Rules out `band_data.json`/summary as the source.
+- Confirmed via cold-start capture (38 requests, full list reviewed) that HRV
+  is not part of the app's initial batch sync on launch either.
+- `/users/{id}/heartRate` endpoint (the one m4ary's zepp-health-cli documents)
+  returns empty `{"items": []}` — consistent with bentasker's finding for a
+  different device years ago. Confirmed dead for the Helio Strap too.
+
+**Conclusion:** HRV appears to be a server-side computed/synced value with no
+client-triggered fetch path observed so far. Most likely candidates for where
+it actually lives, untested:
+1. A background/scheduled sync between watch and Zepp servers (not tied to any
+   UI interaction) — would require a longer passive capture window (30+ min)
+   to catch, not a quick tap-through.
+2. A direct watch-to-phone Bluetooth sync path outside the HTTPS-proxied
+   traffic entirely (Gadgetbridge's HRV support works this way, over BLE, not
+   REST — different attack surface than everything else in this project).
+
+- **Do not re-attempt** the "tap the HRV screen and watch for a new call"
+  approach — this has been tried multiple times and is a confirmed dead end.
+  Next real attempt should be a longer idle capture session or explicit BLE
+  traffic inspection, not more screen-tapping.
+
+### Official Zepp Partner API — context, not a direct lead
+- Intervals.icu (a legitimate, Zepp-sanctioned integration partner) has a
+  working "HRV (rMSSD)" option in their Amazfit sync settings, confirmed live
+  as of April 2026. This is via Zepp's official OAuth partner API — a
+  completely separate, sanctioned pipeline from the mobile-app endpoints this
+  project reverse-engineers. As of June 2025 it was listed as "coming soon,"
+  so Zepp enabled it for partners sometime in the following ~10 months.
+- Confirms HRV data does exist and flows through Zepp's backend somewhere —
+  it is not vaporware. But it does not hand us an endpoint; the official
+  partner API uses different auth and likely different paths than the mobile
+  app.
+- Known gotcha if this data is ever sourced from Intervals.icu or a similar
+  path: a reported bug (Intervals.icu forum, Sep 2025) has HRV values landing
+  on the wrong day — assigned to the previous day instead of the correct one.
+  Watch for date-offset issues if HRV data is ever pulled from a third-party
+  synced source rather than directly from Zepp.
+- Noted as a possible future path (not active): applying for Zepp's official
+  developer/partner access, which would provide documented field names
+  instead of continued guessing. Deliberately parked, not a current task.
 
 ### Unmapped — do not assume
 - `trhr`, `is` — mapped incorrectly in early sessions, left explicitly unmapped
@@ -150,9 +208,21 @@ Supabase MCP + Claude.
   devices with the sensor).
 
 ### Uncharted — require emulator session
-- Respiratory rate, hypopnea, sleep regularity % — not present in any community
-  project. Requires targeted emulator capture, deprioritized until Supabase schema
-  work is underway.
+- Respiratory rate, hypopnea — not present in any community project. Requires
+  targeted emulator capture, deprioritized until Supabase schema work is
+  underway.
+- Confirmed (2026-07-02 research pass): searched community projects, forums,
+  and official Zepp partner integrations (Intervals.icu) — neither respiratory
+  rate nor hypopnea appears anywhere as a retrievable field via any known path,
+  official or reverse-engineered. These remain genuinely uncharted, not just
+  under-documented. No new leads found.
+
+### Not a retrievable metric — reclassified
+- **Sleep regularity %** — removed from the uncharted/backlog list. Confirmed
+  via Zepp's own support documentation: this is a user-configured *setting*
+  (Sleep > Sleep Regularity > Sleep Schedule in the Zepp app), not a computed
+  score the app reports back. There is no field to extract. Deprioritized
+  permanently unless evidence emerges otherwise.
 
 ## Known Traps / Lessons Learned
 
@@ -190,7 +260,6 @@ Supabase MCP + Claude.
 
 - Respiratory rate
 - Hypopnea
-- Sleep regularity %
 - Supabase schema design (next agreed step — map full data landscape: sleep,
   workouts, steps, stress, HRV — before writing any tables)
 - Daily AI health brief
