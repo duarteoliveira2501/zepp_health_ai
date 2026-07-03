@@ -485,22 +485,6 @@ class ZeppClient:
                 except Exception as e:
                     print(f"  Error reading zip: {e}")
 
-    def fetch_raw(self):
-        url = (
-            "https://api-mifit-de2.zepp.com/v1/data/band_data.json"
-            "?query_type=summary&device_type=android"
-            f"&userid={self.user_id}&from_date=2026-06-09&to_date=2026-06-16"
-        )
-        headers = {
-            "apptoken": self.app_token,
-            "Content-Type": "application/json",
-            "User-Agent": "APP_PLATFORM_ANDROID",
-        }
-        resp = requests.get(url, headers=headers)
-        print(f"Status: {resp.status_code}")
-        print(f"Headers: {dict(resp.headers)}")
-        print(f"Body:\n{resp.text}")
-
 
 if __name__ == "__main__":
     client = ZeppClient()

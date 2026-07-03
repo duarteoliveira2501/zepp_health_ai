@@ -18,9 +18,7 @@ Supabase MCP + Claude.
 - GitHub: `duarteoliveira2501/zepp_health_ai`
 - Zepp userid: `7084546365`
 - API host: `api-mifit-de2.zepp.com`
-- Traffic interception: Android Studio emulator (Pixel 9a, Android 16, though
-  recent sessions show Android 17 in captures — verify emulator image version if
-  behavior differs) + HTTP Toolkit
+- Traffic interception: Android Studio emulator (Pixel 9a, Android 17) + HTTP Toolkit
 - Storage: Supabase (`supabase-py`)
 - AI layer: Anthropic API (pay-per-use)
 
