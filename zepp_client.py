@@ -112,7 +112,7 @@ class ZeppClient:
             values = list(raw_bytes)
             total_minutes = len(values)
 
-            actual_bpm = [v for v in values if v < 200 and v != 0]
+            actual_bpm = [v for v in values if v not in (254, 255) and v > 0]
             unscheduled = values.count(255)
             failed = values.count(254)
 
@@ -201,7 +201,7 @@ class ZeppClient:
                     idx_end = (ed_ts - midnight_ts) // 60
                     idx_start = max(0, idx_start)
                     idx_end = min(len(hr_bytes), idx_end)
-                    sleep_hr = [v for v in hr_bytes[idx_start:idx_end] if 0 < v < 200]
+                    sleep_hr = [v for v in hr_bytes[idx_start:idx_end] if v not in (254, 255) and v > 0]
                     if sleep_hr:
                         avg_hr_incl_str = f"{round(sum(sleep_hr) / len(sleep_hr), 1)} BPM"
 
@@ -214,7 +214,7 @@ class ZeppClient:
                             awake_indices.update(range(s_idx, e_idx + 1))
                     sleep_hr_excl = [
                         hr_bytes[i] for i in range(idx_start, idx_end)
-                        if i not in awake_indices and 0 < hr_bytes[i] < 200
+                        if i not in awake_indices and hr_bytes[i] not in (254, 255) and hr_bytes[i] > 0
                     ]
                     if sleep_hr_excl:
                         avg_hr_excl_str = f"{round(sum(sleep_hr_excl) / len(sleep_hr_excl), 1)} BPM"

@@ -85,7 +85,10 @@ Supabase MCP + Claude.
 ### Heart Rate Blob (`data_hr` in `query_type=detail`)
 - 1440 single bytes, one per minute of the day (NOT 720 shorts as bentasker
   documented — that reflects a different device)
-- `255` = unscheduled, `254` = failed, values under 200 = BPM
+- `255` = unscheduled (band not worn — e.g. charging, off-wrist),
+  `254` = failed reading (worn but bad signal/motion), all other
+  values 1–253 = real BPM (heart rate can legitimately exceed 200
+  during intense exercise, so do NOT filter on a <200 threshold)
 - Coordinate system trap: sleep `start`/`stop` values are minutes from the
   *previous* day's midnight (1440–2880 range) — subtract 1440 to align with the
   blob's 0–1440 index
@@ -253,6 +256,10 @@ it actually lives, untested:
    resolve the symptom, inspect the raw API response directly rather than
    iterating on theory — don't assume the first plausible root cause is the
    actual one.
+10. **HR sentinel filtering bug (fixed 2026-07-05):** code previously used
+    `v < 200` as a proxy for "real reading," which would incorrectly discard
+    legitimate high-intensity HR readings above 200 BPM. Correct filter is
+    `v not in (254, 255) and v > 0` — only 254 and 255 are sentinel codes.
 
 ## Backlog (GitHub Issues)
 
