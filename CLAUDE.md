@@ -261,6 +261,73 @@ it actually lives, untested:
     legitimate high-intensity HR readings above 200 BPM. Correct filter is
     `v not in (254, 255) and v > 0` — only 254 and 255 are sentinel codes.
 
+## Known Data Quality Issues
+
+### Sleep start/end time reliability — UNRESOLVED
+
+**Status: confirmed unresolved as of 2026-07-10, not just under-documented.**
+Investigated via a disposable read-only diagnostic script (`check_tz_range.py`,
+not committed to the pipeline) that pulled the `summary` blob's `tz`, `st`,
+and `ed` fields across four separate historical periods and cross-checked
+the resulting sleep_start/sleep_end against remembered actual bedtimes.
+
+**1. Core finding — `tz` cannot be trusted as a conversion signal.** Results
+were inconsistent across every period tested:
+
+- **February 2026 (no travel, winter):** `tz=3600` (UTC+1/CET) — CONFIRMED
+  CORRECT against memory.
+- **April 2026, Korea trip (actual travel dates Apr 9–20):** the `tz` field
+  switched to Korea's offset (`32400`) starting **April 4** — 5 days too
+  early — and reverted **April 22–23** — 2–3 days too late. This lines up
+  with a batch-sync/upload-delay artifact (see the `sync` field found during
+  this investigation, which showed multiple distinct nights uploading in a
+  single batch), not real-time location tracking. Worse: a raw timestamp
+  check on **April 20** (a confirmed Korea night) only produced the correct
+  bedtime when using **Spain's offset (3600)**, not Korea's own `tz` value
+  (`32400`) for that same record — meaning even the raw `st`/`ed` timestamps
+  don't behave as naively expected during travel.
+- **June 2026, Portugal trip (actual travel dates June 13–27):** the `tz`
+  field correctly tracked the Portugal date range — but by showing `0`, not
+  Portugal's real UTC offset of `3600` — and was CONFIRMED CORRECT against
+  memory for the entire month, including the Spain bookend dates (June 1–13,
+  28–30), which showed `tz=3600` and were also confirmed correct.
+- **July 2026 (no travel, current period):** `tz=3600` — the same value as
+  the correct June Spain readings — but CONFIRMED INCORRECT against memory.
+  Actual July 10 bedtime was 02:07; the data showed 01:07, a consistent
+  1-hour-early error.
+
+**2. Why this rules out simple theories.** June and July show the *identical*
+`tz` value (`3600`) for Spain, but June is correct and July is wrong — so
+this is **not** a simple stuck-on-winter-time DST bug (that would require the
+`tz` value itself to be wrong, not just the resulting accuracy). A plausible
+candidate — an Amazfit-acknowledged DST bug affecting Helio Strap
+Exertion/Weather features after the Oct 2025 DST-to-standard-time switch —
+was investigated as a possible explanation but does **not** cleanly fit this
+data pattern. Noted here specifically so this theory isn't fruitlessly
+re-investigated later without new evidence.
+
+**3. No working formula exists.** No fixed offset, DST-calendar rule, or
+travel-detection formula tested during this investigation reliably predicts
+correct sleep start/end times across all four observed periods. This is
+confirmed **unresolved**.
+
+**4. Scope — `avg_sleep_hr` is NOT affected.** `avg_sleep_hr_incl_awake` and
+`avg_sleep_hr_excl_awake` have been separately confirmed correct by the user
+and are outside this issue. The problem applies specifically to
+`sleep_start`/`sleep_end` display values (i.e. any use of `tz` to convert
+`st`/`ed` to local wall-clock time).
+
+**5. Recommended next steps (not yet started):**
+- Do **not** build Supabase schema fields or AI features that assume `st`/`ed`
+  are trustworthy without a disclaimer or spot-check step.
+- A live emulator + HTTP Toolkit capture session, run in real time while
+  manually noting actual bedtime, would likely give a cleaner signal than
+  more historical data analysis — historical analysis alone produced
+  contradictory results across all four test periods today.
+- Consider whether app version, phone OS version, or a specific Zepp/Amazfit
+  server-side change between late June and July 10 could be a lead, if this
+  is ever revisited.
+
 ## Backlog (GitHub Issues)
 
 - Respiratory rate
