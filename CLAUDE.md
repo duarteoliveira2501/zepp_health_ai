@@ -445,6 +445,16 @@ blanket correction to bake into the pipeline.
 - 6 tables exist: `dates`, `sleep_summary`, `sleep_stages`, `heart_rate_daily`,
   `wake_hybridcharge`, `naps`. `naps` is deliberately unused/deferred — never
   written to.
+- `sleep_summary.total_minutes` is the full time-in-bed duration (sleep_end −
+  sleep_start), which includes awake time. `sleep_summary.actual_sleep_time`
+  (added 2026-07-13) is `deep_minutes + light_minutes + rem_minutes` — the
+  actual time asleep, excluding awake periods. Both columns are kept; use
+  `actual_sleep_time` for anything meant to represent real sleep duration.
+- "Sleep duration" always means `actual_sleep_time` (excludes awake minutes).
+  `total_minutes` is only the raw span from sleep_start to sleep_end and
+  includes awake time — do not use it when the ask is for 'how long I
+  slept.' Default to actual_sleep_time unless total_minutes is explicitly
+  requested.
 - Workflow: run `decode_sleep()` first, compare its printed sleep_start/
   sleep_end against the Zepp app (per the unresolved tz issue above), then
   call `sync_sleep_to_supabase(confirmed_dates, offsets=None, ...)`.
