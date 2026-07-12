@@ -94,6 +94,9 @@ Supabase MCP + Claude.
   blob's 0–1440 index
 - Average sleep HR (excl. awake periods) implemented and confirmed within ~1–2 BPM
   of the Zepp app
+- **Always slice by sleep_start/sleep_end before analyzing "sleep HR"** —
+  the array itself has no concept of sleep vs. awake, it's just every
+  minute of the day.
 
 ### Wake HybridCharge (CONFIRMED — verified via live capture AND extraction 2026-07-02)
 - Endpoint: `GET /v2/users/me/events`
@@ -288,6 +291,13 @@ it actually lives, untested:
     `v < 200` as a proxy for "real reading," which would incorrectly discard
     legitimate high-intensity HR readings above 200 BPM. Correct filter is
     `v not in (254, 255) and v > 0` — only 254 and 255 are sentinel codes.
+11. **`hr_values` is a full-day array, not a sleep-only array.** It's indexed
+    by minute-of-day (0–1439), covering the whole 24h, not just the sleep
+    window. Any sleep-HR analysis MUST slice it using `sleep_start`/`sleep_end`
+    from `sleep_summary` first — treating the raw array as "sleep HR" without
+    slicing will pick up daytime activity (workouts, walks) and produce
+    false spikes. Confirmed bug 2026-07-13: a 140+ bpm "sleep spike" turned
+    out to be a daytime event hours after wake time.
 
 ## Known Data Quality Issues
 
