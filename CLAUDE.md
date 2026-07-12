@@ -258,6 +258,26 @@ it actually lives, untested:
 
 ## Known Traps / Lessons Learned
 
+0. **Never include "today" in the default upload window — end at yesterday.**
+   Confirmed 2026-07-13: uploading `heart_rate_daily` for 2026-07-12 showed a
+   759-minute continuous block of `254` (failed reading) from 11:21am through
+   midnight, despite the band being worn nearly all day. Root cause: the
+   watch's data only reaches Zepp's servers after the phone app does a
+   watch -> phone -> cloud sync, which may not have completed for the most
+   recent day(s) at the time the script runs — pulling a day too soon
+   silently returns incomplete `data_hr`. Fixed: `decode_sleep()` and
+   `sync_sleep_to_supabase()` now default `end_date` to yesterday
+   (`date.today() - 1 day`), not today, so the rolling window is
+   "yesterday back 7 days" rather than "today back 7 days." An explicit
+   `end_date` passed by the caller still bypasses this default and is used
+   as-is — this only protects the no-args default case. `decode_sleep` was
+   already documented (see "Known Trap — timestamp/startTime skew" section)
+   as an unrelated separate code path from `fetch_wake_hybridcharge`'s
+   `_last_n_days_ms` helper; that helper was NOT changed by this fix and may
+   have the same today-vs-yesterday exposure if HybridCharge data ever shows
+   similar gaps — not yet confirmed as an actual problem there, just an
+   unverified same-shape risk.
+
 1. **Research before reverse-engineering.** Skipping the community-project audit
    step caused redundant work early in the project.
 2. **Field mappings must be verified, not assumed.** Several initial interpretations
@@ -505,6 +525,23 @@ blanket correction to bake into the pipeline.
   public.wake_hybridcharge TO service_role;` run once in the SQL editor.
 - Dependency: `supabase` (v2.31.0) added to `requirements.txt` (new file —
   none existed before).
+- **`heart_rate_daily` restructured 2026-07-13 (one row per minute, not an
+  array).** Previously this table stored one row per day with `hr_values`
+  as an `int4[]` — the upload compacted that array by dropping
+  sentinel/invalid readings (`254`/`255`/`0`), which silently destroyed the
+  minute-of-day alignment (element `i` no longer meant minute `i` once
+  entries were removed), making it impossible to filter by time of day or
+  slice against `sleep_start`/`sleep_end`. Rather than fix alignment within
+  the array, the table was restructured: primary key is now
+  `(date, minute)`, with columns `minute` (int, 0–1439), `ts` (timestamptz,
+  naive local wall-clock, same convention as `sleep_summary.sleep_start`/
+  `sleep_end`), and `hr_value` (int, `NULL` for invalid/sentinel readings).
+  `sync_sleep_to_supabase` now deletes+reinserts all ~1440 rows for a date
+  on each upload (same pattern as `sleep_stages`), rather than upserting a
+  single array row. **All 8 previously-uploaded dates were truncated as
+  part of this migration** (they only had the old, already-known-stale
+  compacted-array data) — everything needs a fresh
+  `sync_sleep_to_supabase` run to be repopulated.
 
 ## Backlog (GitHub Issues)
 

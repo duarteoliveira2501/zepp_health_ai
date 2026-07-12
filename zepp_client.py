@@ -232,8 +232,11 @@ class ZeppClient:
         return avg_incl, avg_excl
 
     def decode_sleep(self, start_date: str = None, end_date: str = None):
+        # Default window ends yesterday, not today — the current day's data
+        # may not have finished syncing from watch -> phone -> Zepp servers
+        # yet when this runs, producing incomplete data_hr for that day.
         if end_date is None:
-            end_date = date.today().isoformat()
+            end_date = (date.today() - timedelta(days=1)).isoformat()
         if start_date is None:
             start_date = (date.today() - timedelta(days=7)).isoformat()
 
@@ -320,8 +323,9 @@ class ZeppClient:
             start_date/end_date: range to fetch from the API (defaults to
                 the last 7 days, same as decode_sleep()).
         """
+        # Default window ends yesterday, not today — see decode_sleep() for why.
         if end_date is None:
-            end_date = date.today().isoformat()
+            end_date = (date.today() - timedelta(days=1)).isoformat()
         if start_date is None:
             start_date = (date.today() - timedelta(days=7)).isoformat()
         offsets = offsets or {}
@@ -386,11 +390,27 @@ class ZeppClient:
             }, on_conflict="date").execute()
 
             if rec["hr_bytes"] is not None:
-                clean_hr = [v for v in rec["hr_bytes"] if v not in (254, 255) and v > 0]
-                self.supabase.table("heart_rate_daily").upsert({
-                    "date": raw_date,
-                    "hr_values": clean_hr,
-                }, on_conflict="date").execute()
+                # One row per minute of the day, with its own wall-clock
+                # timestamp, instead of a single packed array — makes
+                # time-of-day filtering (e.g. against sleep_start/sleep_end)
+                # a plain WHERE clause instead of array-index math. `ts` is
+                # stored naive (no UTC offset) for the same reason as
+                # sleep_start/sleep_end above: Studio's grid always renders
+                # timestamptz in UTC, so a naive local value displays as the
+                # exact confirmed clock time with no mental conversion.
+                midnight = datetime.strptime(raw_date, "%Y-%m-%d")
+                hr_rows = [
+                    {
+                        "date": raw_date,
+                        "minute": minute,
+                        "ts": (midnight + timedelta(minutes=minute)).isoformat(),
+                        "hr_value": v if (v not in (254, 255) and v > 0) else None,
+                    }
+                    for minute, v in enumerate(rec["hr_bytes"])
+                ]
+                self.supabase.table("heart_rate_daily").delete().eq("date", raw_date).execute()
+                if hr_rows:
+                    self.supabase.table("heart_rate_daily").insert(hr_rows).execute()
 
             self.supabase.table("sleep_stages").delete().eq("date", raw_date).execute()
             stage_rows = [
