@@ -194,6 +194,34 @@ it actually lives, untested:
   developer/partner access, which would provide documented field names
   instead of continued guessing. Deliberately parked, not a current task.
 
+### Average sleep HR — NOT a direct API field (confirmed 2026-07-12)
+- The app displays a single "Avg sleep HR" number (e.g. "Avg 53 BPM") on the
+  Sleep Heart Rate screen. Checked whether this is a field the API hands back
+  directly, rather than something we compute ourselves from `data_hr`.
+- **Full `slp` summary dict dumped and inspected (2026-07-12, unfiltered)** —
+  every key present: `stage`, `odd_stage`, `spos`/`spol`/`spor`/`spob`, `st`,
+  `ed`, `obt`, `ebt`, `dp`, `lt`, `wk`, `wc`, `supNap`, `supRem`, `is`, `lb`,
+  `dt`, `rhr`, `ss`, `to`, `sleepSource`, `sleepScoreVersion`,
+  `sleepVersion`, `napVersion`, `sleepAlgoVersion`. No average-HR field.
+  `rhr` is a single resting-HR reading, not a sleep-window average.
+- Confirmed this is identical whether pulled from the `query_type=summary`
+  response or the embedded `summary` field inside the `query_type=detail`
+  response — same `slp` structure both places.
+- **`stp` block also dumped** — steps/activity data only (`ttl`, `dis`,
+  `cal`, `stage` with step counts, `stepStageSummary`), no HR content.
+- **Probed `/v2/users/me/events` with 11 plausible eventType/subType
+  combinations** (`sleep`/`Sleep` × `heart_rate`/`sleep_hr`/`avg_hr`/
+  `avg_heart_rate`, plus reversed `heart_rate`/`heartrate` × `sleep`, and
+  `HeartRate`/`SleepHeartRate` × `sleep_summary`/`summary`) — all returned
+  `200` with `0 items`. No dedicated sleep-HR-summary event type found.
+- **Conclusion:** no direct field exists via any endpoint checked so far.
+  The app's displayed average is being computed (client-side or
+  server-side-but-unexposed) from the same minute-level `data_hr` blob this
+  project already has access to — same category as sleep score (`ss`, which
+  *is* returned pre-computed) but unlike sleep score, avg sleep HR is not
+  exposed as a field. Continuing to compute it ourselves from `data_hr` is
+  the correct approach, not a workaround for a missing integration.
+
 ### Unmapped — do not assume
 - `trhr`, `is` — mapped incorrectly in early sessions, left explicitly unmapped
   until re-verified.
@@ -327,6 +355,90 @@ and are outside this issue. The problem applies specifically to
 - Consider whether app version, phone OS version, or a specific Zepp/Amazfit
   server-side change between late June and July 10 could be a lead, if this
   is ever revisited.
+
+**6. Minute-level `data_hr` blob does NOT show the same 1-hour error (spot-checked
+2026-07-10).** That night's `sleep.st` reported 01:07 (documented bug — actual
+bedtime was 02:07, one hour early). The independently-decoded `data_hr` byte
+array for the same night shows HR still elevated/variable (56–81 bpm) through
+01:55, then settling into a stable resting baseline (54–60 bpm) starting right
+at ~02:00–02:15 — matching the true 02:07 bedtime, not the buggy 01:07 sleep
+summary value. `data_hr` is indexed as minute-of-day directly (see "Heart Rate
+Blob" section above) and never passes through the `tz`-based epoch conversion
+that `sleep.st`/`sleep.ed` use, so it appears to be a structurally separate,
+more reliable path for inferring actual sleep onset than the reported
+`sleep_start` field. Only spot-checked on one night so far — not exhaustively
+verified across the Korea-trip period, but a promising cross-check signal if
+this issue is revisited.
+
+**7. The Zepp app's own displayed bedtime can differ from BOTH the raw `tz`
+field AND from any offset we'd derived (spot-checked April 20, 2026 — a
+Korea-trip night already flagged in point 1 above).** Three different values
+now exist for this single night's `sleep.st`:
+- Raw `tz` field (32400 = Korea/UTC+9) → 07:27 AM (nonsensical as a bedtime)
+- "Spain" offset (3600), the value point 1 above found to check out against
+  memory for this date → 23:27 (April 19)
+- **What the Zepp app itself displays on the Sleep screen → 01:27 AM** — this
+  corresponds to a +3h offset, which doesn't match the `tz` field value or
+  any other field visible in the decoded summary payload. The app is not
+  simply mis-happlying the `tz` field we can see; it's showing a number that
+  can't be reproduced from the data this project has access to.
+- Cross-checking against `data_hr`: HR is still elevated/variable (58–77 bpm)
+  through 22:50, hits a ~60-minute sensor gap (254 failed-reading) from
+  22:55–23:55, then is already stable and low (48–56 bpm) by 00:00 — a full
+  87 minutes before the app's claimed 01:27 sleep onset. This contradicts
+  01:27 as the real bedtime and instead supports the earlier ~23:27 estimate.
+- **Implication:** the sleep-timing bug is not fully explained by a bad `tz`
+  field alone — the app's own UI can diverge from its own underlying data by
+  yet another, different amount. Any future fix attempt needs to account for
+  this, not just "correct the tz offset" in the extraction code.
+
+**8. The `data_hr` blob's own minute-of-day coordinate frame is NOT itself
+shifted — only `slp.st`/`slp.ed` are wrong (confirmed 2026-07-11 and
+2026-07-12, two consecutive days).** For both dates, the raw API `st`/`ed`
+decoded to a window exactly 1 hour earlier than the app's own displayed
+window (e.g. 2026-07-12: API gave 02:52→10:20, app showed 03:52→11:20).
+Applying a **+1 hour shift to both `st` and `ed`** (window boundaries only —
+`data_hr`'s own minute-index-to-clock-time mapping, via the existing
+`tz`-derived midnight anchor, was left untouched) reproduced the app's
+displayed window exactly on both dates, AND the resulting minute-by-minute
+HR curve shape (deep-sleep dips, REM bumps, and — most tellingly — the exact
+clock-time position and relative size of the largest awake/HR spike of the
+night) matched the app's own sleep-HR chart closely on both dates. This only
+works if the blob's minute→clock mapping was already correct; if the blob
+itself were also shifted, correcting only `st`/`ed` would have misaligned
+the extracted slice against the app's chart instead of matching it.
+**Conclusion: the 1440-point `data_hr` array is captured/indexed correctly.
+The bug is isolated to `slp.st`/`slp.ed` (and anything downstream that keys
+off them, e.g. avg-sleep-HR window slicing).** This is consistent with — and
+now more strongly evidenced than — point 6 above. Still only 2 consecutive
+days confirmed with this specific +1h/both-boundaries pattern; not yet
+proven as a universal rule (see point 7, where a single fixed offset did NOT
+explain a Korea-trip night). Treat +1h-on-both-boundaries as a promising,
+recently-recurring pattern to keep spot-checking day by day, not yet a
+blanket correction to bake into the pipeline.
+
+### `data_hr` resolution — per-minute, not per-second (confirmed 2026-07-12)
+
+- The Zepp app's live Heart Rate chart appears to render per-second (or
+  otherwise sub-minute) samples. `data_hr` only exposes one byte per minute
+  (see "Heart Rate Blob" above), so it is a coarser signal by construction.
+- Spot-checked 2026-07-11, 1:06 PM–2:06 PM: clock-time alignment between
+  `data_hr` and the app's chart is confirmed correct (e.g. app showed 119 BPM
+  at 2:06:20 PM; `data_hr` showed 116 BPM at 2:06 PM — a match once the
+  20-second offset is accounted for). Overall curve shape also matched
+  closely when plotted.
+- However, the app displayed a ~145 BPM peak around 1:57–2:00 PM that
+  `data_hr` did not capture — its per-minute values over the same window
+  topped out at 139 BPM (1:57 PM). This is expected: a per-minute value
+  (whatever sampling/aggregation Zepp uses internally to produce it) can
+  legitimately miss a brief sub-minute spike that a per-second feed would
+  catch.
+- **Conclusion: this is a resolution limitation, not an alignment bug.**
+  Don't re-investigate short peak-value mismatches between `data_hr` and the
+  app as a timestamp issue — check whether the gap is consistent with normal
+  minute-level smoothing first. This is a separate issue from the confirmed
+  `slp.st`/`slp.ed` timezone bug above; `data_hr` clock alignment itself
+  remains solid.
 
 ## Backlog (GitHub Issues)
 

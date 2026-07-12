@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Disposable diagnostic scripts (not part of the pipeline)
+check_*.py
+hr_window_*.png
