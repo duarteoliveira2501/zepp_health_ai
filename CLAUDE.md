@@ -440,6 +440,52 @@ blanket correction to bake into the pipeline.
   `slp.st`/`slp.ed` timezone bug above; `data_hr` clock alignment itself
   remains solid.
 
+## Supabase Upload (`sync_sleep_to_supabase`)
+
+- 6 tables exist: `dates`, `sleep_summary`, `sleep_stages`, `heart_rate_daily`,
+  `wake_hybridcharge`, `naps`. `naps` is deliberately unused/deferred — never
+  written to.
+- Workflow: run `decode_sleep()` first, compare its printed sleep_start/
+  sleep_end against the Zepp app (per the unresolved tz issue above), then
+  call `sync_sleep_to_supabase(confirmed_dates, offsets=None, ...)`.
+  `confirmed_dates` is an explicit allowlist — any date not listed is never
+  uploaded. `offsets` is an optional `{"YYYY-MM-DD": minutes}` dict that
+  shifts that date's sleep_start/sleep_end by ± minutes (matches the
+  documented "+1h to both boundaries" correction pattern) before avg sleep
+  HR and duration are recomputed. There is deliberately no in-script
+  natural-language or interactive parsing of corrections — the human
+  (Claude Chat + Duarte) agrees on `confirmed_dates`/`offsets` in
+  conversation first, then Claude Code is told to run it with those exact
+  values.
+- `sleep_stages` rows are independent of any `offsets` correction — deleted
+  and reinserted fresh per date, with `stage_start`/`stage_stop` = raw value
+  − 1440 (per the documented 1440–2880 coordinate trap). Spot-checked
+  2026-07-05: the first stage block's start (178 min → 02:58) matched the
+  confirmed sleep_start exactly, confirming — consistent with the `data_hr`
+  finding above — that the per-minute stage array was never affected by the
+  `slp.st`/`slp.ed` bug, only the top-level summary fields were.
+- **`sleep_start`/`sleep_end` are stored as naive timestamps (no UTC offset
+  attribute)**, not offset-aware ones — a deliberate choice, not an
+  oversight. Supabase Studio's table editor always renders `timestamptz`
+  columns in UTC with no per-project override. Storing an offset-aware local
+  time (e.g. `03:52+01:00`) gets correctly converted and stored as `02:52
+  UTC`, which is technically correct but then requires mentally re-adding
+  the offset every time the table is browsed — confusing for a personal-use
+  single-timezone tool. Instead, the confirmed local wall-clock number
+  (already timezone-corrected via `offsets`) is sent with no offset
+  attached, so Postgres stores that literal number and Studio's UTC-labeled
+  grid displays the exact confirmed digits with no mental conversion needed.
+  If this project ever needs to support multiple timezones, this decision
+  should be revisited.
+- Needed a one-time Supabase-side fix during setup: tables created via the
+  SQL editor lacked table-level GRANTs, causing `permission denied for table
+  dates` (`42501`) on first upload attempt despite using the `sb_secret_...`
+  key. Fixed with `GRANT SELECT, INSERT, UPDATE, DELETE ON public.dates,
+  public.sleep_summary, public.sleep_stages, public.heart_rate_daily,
+  public.wake_hybridcharge TO service_role;` run once in the SQL editor.
+- Dependency: `supabase` (v2.31.0) added to `requirements.txt` (new file —
+  none existed before).
+
 ## Backlog (GitHub Issues)
 
 - Respiratory rate
