@@ -373,6 +373,7 @@ class ZeppClient:
                 "sleep_start": sleep_start_iso,
                 "sleep_end": sleep_end_iso,
                 "total_minutes": total_min,
+                "actual_sleep_time": rec["totals"]["Deep"] + rec["totals"]["Light"] + rec["totals"]["REM"],
                 "score": rec["score"],
                 "deep_minutes": rec["totals"]["Deep"],
                 "light_minutes": rec["totals"]["Light"],
