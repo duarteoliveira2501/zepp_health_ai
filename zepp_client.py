@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -231,19 +233,83 @@ class ZeppClient:
 
         return avg_incl, avg_excl
 
-    def decode_sleep(self, start_date: str = None, end_date: str = None):
+    def _existing_sleep_dates(self, start_date: str, end_date: str) -> set:
+        """Dates already present in sleep_summary within [start_date, end_date].
+        Used as a belt-and-suspenders skip on top of _last_uploaded_date() —
+        catches any date that individually never made it in, not just the
+        overall backfill boundary."""
+        resp = (
+            self.supabase.table("sleep_summary")
+            .select("date")
+            .gte("date", start_date)
+            .lte("date", end_date)
+            .execute()
+        )
+        return {row["date"] for row in resp.data}
+
+    def _last_uploaded_date(self) -> str | None:
+        """Most recent date present in sleep_summary, or None if empty
+        (first-ever run). Used to auto-derive the catch-up start_date."""
+        resp = (
+            self.supabase.table("sleep_summary")
+            .select("date")
+            .order("date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return resp.data[0]["date"] if resp.data else None
+
+    def decode_sleep(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        skip_uploaded: bool = True,
+        fallback_days: int = 7,
+    ):
+        """Args:
+            start_date: defaults to the day after the last date already in
+                Supabase's sleep_summary — so a normal weekly run naturally
+                covers "since last time," and a run after missing several
+                weeks automatically backfills the whole gap with no manual
+                date math. Falls back to `fallback_days` days ago if
+                sleep_summary is empty (first-ever run). Pass explicitly to
+                override.
+            skip_uploaded: if True (default), also skips any individual
+                date within the range that's already in sleep_summary —
+                cheap insurance on top of the start_date auto-detection,
+                in case a date was uploaded out of order. Pass False to
+                force re-decoding of an already-uploaded date (e.g. to
+                re-verify or re-confirm a correction).
+            fallback_days: window size used only when sleep_summary is
+                empty and start_date isn't given.
+        """
         # Default window ends yesterday, not today — the current day's data
         # may not have finished syncing from watch -> phone -> Zepp servers
         # yet when this runs, producing incomplete data_hr for that day.
         if end_date is None:
             end_date = (date.today() - timedelta(days=1)).isoformat()
         if start_date is None:
-            start_date = (date.today() - timedelta(days=7)).isoformat()
+            last_uploaded = self._last_uploaded_date()
+            if last_uploaded:
+                start_date = (date.fromisoformat(last_uploaded) + timedelta(days=1)).isoformat()
+            else:
+                start_date = (date.today() - timedelta(days=fallback_days)).isoformat()
+
+        if start_date > end_date:
+            print(f"Nothing to sync — last upload ({start_date}) is already caught up through {end_date}.")
+            return []
+
+        already_uploaded = self._existing_sleep_dates(start_date, end_date) if skip_uploaded else set()
 
         records, detail_by_date = self._fetch_sleep_records(start_date, end_date)
         extracted = []
 
         for record in records:
+            raw_date = record.get("date_time", "unknown")
+            if raw_date in already_uploaded:
+                print(f"\n{raw_date}: already in Supabase, skipping\n")
+                continue
+
             rec = self._extract_sleep_record(record, detail_by_date)
             if rec is None:
                 print(f"\n{record.get('date_time', 'unknown')}: no summary data\n")

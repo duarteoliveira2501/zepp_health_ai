@@ -485,6 +485,29 @@ blanket correction to bake into the pipeline.
   includes awake time — do not use it when the ask is for 'how long I
   slept.' Default to actual_sleep_time unless total_minutes is explicitly
   requested.
+- **Catch-up syncs (missed a week or more, added 2026-07-13):**
+  `decode_sleep()`'s default `start_date` is no longer a fixed "7 days
+  ago" — it auto-detects the most recent date already in `sleep_summary`
+  (via `_last_uploaded_date()`) and starts the day after it, through
+  yesterday. A normal weekly run naturally covers "since last time"; a run
+  after missing several weeks automatically backfills the whole gap with
+  no manual date math. Falls back to `fallback_days` (default 7) days ago
+  only if `sleep_summary` is completely empty (first-ever run). If the
+  auto-detected start_date is already past end_date (nothing missing),
+  `decode_sleep()` prints a message and returns `[]` without hitting the
+  Zepp API. `skip_uploaded=True` (still the default) additionally skips
+  any individual date within the resolved range that's already in
+  `sleep_summary` — cheap insurance on top of the start_date
+  auto-detection, in case a date was uploaded out of the normal
+  day-by-day order. Pass `start_date` explicitly to override
+  auto-detection, or `skip_uploaded=False` to force re-decoding of an
+  already-uploaded date (e.g. to re-verify or re-confirm a correction).
+  Note this only affects what's *printed/returned* by `decode_sleep()` —
+  `sync_sleep_to_supabase()` was already idempotent per date before this
+  change (upserts on `date` for `dates`/`sleep_summary`/
+  `wake_hybridcharge`, delete-then-reinsert on `date` for
+  `sleep_stages`/`heart_rate_daily`), so re-uploading an already-present
+  date was never a duplicate-row risk, just wasted verification effort.
 - Workflow: run `decode_sleep()` first, compare its printed sleep_start/
   sleep_end against the Zepp app (per the unresolved tz issue above), then
   call `sync_sleep_to_supabase(confirmed_dates, offsets=None, ...)`.
