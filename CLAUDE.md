@@ -141,6 +141,20 @@ Supabase MCP + Claude.
   requested range by `startTime`. Explicit `from_ts`/`to_ts` passed by a
   caller are used as-is.
 
+### Sleep timestamps (`sleep_start`/`sleep_end`) — manually corrected, trustworthy
+- Unlike the raw extraction, `sleep_start`/`sleep_end` values in the
+  `sleep_summary` Supabase table are NOT taken as-is from the Zepp API.
+  Duarte manually checks and corrects both fields for every night each time
+  new data is uploaded.
+- This means these two fields can be treated as precise and trustworthy for
+  analysis (e.g. bedtime-vs-duration correlations), unlike other
+  timezone-sensitive fields in this project (e.g. HybridCharge's
+  `item.timestamp`/`startTime` skew above, which remains an open bug in raw
+  extraction with no manual correction step).
+- This manual correction step is specific to `sleep_start`/`sleep_end`. It
+  does not apply to other fields pulled from the same raw sleep payload
+  (e.g. `rhr`, `wc`, stage minutes) — those are taken as-is from the API.
+
 ### Heart Rate Variability (HRV) — NOT YET FOUND
 - Not present via `eventType=hrv`, `eventType=Charge`, `eventType=readiness`, or
   substring filters `hrv`, `biocharge`, `bio_charge` in HTTP Toolkit as of
@@ -446,6 +460,23 @@ proven as a universal rule (see point 7, where a single fixed offset did NOT
 explain a Korea-trip night). Treat +1h-on-both-boundaries as a promising,
 recently-recurring pattern to keep spot-checking day by day, not yet a
 blanket correction to bake into the pipeline.
+
+**9. The +1h/both-boundaries pattern now holds broadly across a 41-day
+backfill (2026-07-13, May 25–Jul 4), with one unexplained exception on a
+travel day.** Duarte skimmed the full decoded sleep-window list from memory
+(not a per-night app check, given the volume — see the bulk-backfill
+exception noted in the memory workflow doc) and confirmed: every date from
+May 25–Jun 12 and Jun 14–Jul 4 needed the standard +60min correction on both
+`st` and `ed`, consistent with point 8. **Jun 13 alone required no
+correction.** Jun 13 was Duarte's Madrid→Portugal travel day — but both
+bookending dates (Jun 12 and Jun 14) still needed the +60min fix, and the
+return trip (Portugal→Madrid, Jun 27) did NOT produce a similar single
+correct-night exception. Spain and Portugal are only 1h apart in summer
+(CEST vs WEST), which isn't enough to cleanly explain a night landing exactly
+on-offset by coincidence, and the pattern not repeating on the return leg
+argues against a simple travel/DST theory. Logged as a new, still-unexplained
+data point — do not treat it as evidence for a travel-detection theory
+without further confirmed instances.
 
 ### `data_hr` resolution — per-minute, not per-second (confirmed 2026-07-12)
 
