@@ -155,6 +155,35 @@ Supabase MCP + Claude.
   does not apply to other fields pulled from the same raw sleep payload
   (e.g. `rhr`, `wc`, stage minutes) — those are taken as-is from the API.
 
+### Zepp sleep score (`ss`) algorithm — confirmed opaque, community-corroborated
+- Analysis across 49 nights of Supabase data found no meaningful correlation
+  between sleep score and either deep sleep % (r = -0.25) or REM % (r = -0.02).
+  Score tracks almost entirely with total sleep duration instead.
+- This isn't unique to this project — external research (Feb 2026 first-week
+  review of the same Helio Strap device, published on Medium by
+  @CuriousCatalyst) independently raised the identical question: a 6h50m
+  night with 14% deep sleep scored 64, while a 7h56m night with 15% deep
+  sleep (barely different %) scored 89. Their conclusion matches: the
+  algorithm appears to weight total duration, efficiency, and consistency
+  far more heavily than stage composition, but Zepp has never published the
+  actual formula.
+- Broader community sentiment (Amazfit/Zepp forums) also shows the reverse
+  complaint — some users feel raw deep-sleep *minutes* inflate their score
+  even after disrupted, restless nights compared to people who slept less
+  but woke more — but this is about absolute deep-sleep minutes, not deep %
+  of total sleep, so it doesn't contradict this project's finding.
+- Independent accuracy reviews note Amazfit's sleep stage detection is
+  roughly 80% accurate against polysomnography and is noticeably weaker at
+  distinguishing light/deep/REM specifically than at measuring total
+  duration/wake times (relies on HR + motion, not brain activity). This is a
+  plausible confound: stage-detection noise itself could be suppressing any
+  real correlation between stage % and score, separate from the algorithm's
+  actual weighting.
+- Conclusion: treat sleep score in this project as a duration-and-continuity
+  proxy, not a stage-quality proxy. No further attempt planned to
+  reverse-engineer the exact score formula — not extractable via available
+  data, and Zepp does not publish it.
+
 ### Heart Rate Variability (HRV) — NOT YET FOUND
 - Not present via `eventType=hrv`, `eventType=Charge`, `eventType=readiness`, or
   substring filters `hrv`, `biocharge`, `bio_charge` in HTTP Toolkit as of
