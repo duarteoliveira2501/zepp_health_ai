@@ -386,14 +386,17 @@ class ZeppClient:
                 correction pattern) before recomputing total duration and
                 avg sleep HR. Does NOT affect sleep_stages, whose raw
                 start/stop values are a separate, unaffected code path.
-            start_date/end_date: range to fetch from the API (defaults to
-                the last 7 days, same as decode_sleep()).
+            start_date/end_date: range to fetch from the API. If not given,
+                start_date defaults to min(confirmed_dates) — guaranteeing
+                the fetch window always covers every requested date,
+                regardless of how far back confirmed_dates goes. end_date
+                defaults to yesterday, same as decode_sleep().
         """
         # Default window ends yesterday, not today — see decode_sleep() for why.
         if end_date is None:
             end_date = (date.today() - timedelta(days=1)).isoformat()
         if start_date is None:
-            start_date = (date.today() - timedelta(days=7)).isoformat()
+            start_date = min(confirmed_dates) if confirmed_dates else (date.today() - timedelta(days=7)).isoformat()
         offsets = offsets or {}
 
         records, detail_by_date = self._fetch_sleep_records(start_date, end_date)
