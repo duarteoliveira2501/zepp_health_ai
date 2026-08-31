@@ -580,6 +580,16 @@ without further confirmed instances.
   (Claude Chat + Duarte) agrees on `confirmed_dates`/`offsets` in
   conversation first, then Claude Code is told to run it with those exact
   values.
+- **Fixed 2026-08-31 footgun:** `sync_sleep_to_supabase`'s default
+  `start_date` used to be hardcoded to a fixed 7-days-back window,
+  unrelated to `confirmed_dates` — passing a `confirmed_dates` list
+  spanning more than 7 days without an explicit `start_date` silently
+  uploaded only the most recent 7 days' worth and dropped the rest with no
+  error (confirmed via manual test: a 14-date list only produced 7
+  uploads). Now, when `start_date` isn't passed explicitly, it defaults to
+  `min(confirmed_dates)` instead, so the fetch window always covers every
+  requested date. Explicit `start_date`/`end_date` still override this.
+  `end_date` still defaults to yesterday as before.
 - `sleep_stages` rows are independent of any `offsets` correction — deleted
   and reinserted fresh per date, with `stage_start`/`stage_stop` = raw value
   − 1440 (per the documented 1440–2880 coordinate trap). Spot-checked
