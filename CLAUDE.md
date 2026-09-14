@@ -568,6 +568,16 @@ without further confirmed instances.
   `wake_hybridcharge`, delete-then-reinsert on `date` for
   `sleep_stages`/`heart_rate_daily`), so re-uploading an already-present
   date was never a duplicate-row risk, just wasted verification effort.
+- **`sync_sleep_to_supabase()` does NOT auto-detect the gap like `decode_sleep()`
+  does.** Its own `start_date`/`end_date` defaults are a fixed "last 7 days
+  from today" window, not the last-uploaded-date auto-detection that
+  `decode_sleep()` has. Confirmed 2026-09-14: calling it with only
+  `confirmed_dates`/`offsets` for a 14-day catch-up (Aug 31–Sep 13) silently
+  uploaded only the most recent 7 dates (Sep 7–13) and skipped the rest with
+  no error or warning — `raw_date not in confirmed` never triggers if the
+  record was never fetched in the first place. When confirming a gap longer
+  than 7 days, always pass `start_date`/`end_date` explicitly to
+  `sync_sleep_to_supabase()` to cover the full confirmed range.
 - Workflow: run `decode_sleep()` first, compare its printed sleep_start/
   sleep_end against the Zepp app (per the unresolved tz issue above), then
   call `sync_sleep_to_supabase(confirmed_dates, offsets=None, ...)`.
