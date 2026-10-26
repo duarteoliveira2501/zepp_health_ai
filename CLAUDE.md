@@ -507,6 +507,25 @@ argues against a simple travel/DST theory. Logged as a new, still-unexplained
 data point — do not treat it as evidence for a travel-detection theory
 without further confirmed instances.
 
+### DST fall-back night (2026-10-25) — manually hard-coded
+
+- Night of Oct 24→25 crossed Spain's 03:00→02:00 clock change (summer → winter
+  time). Raw API gave 02:17→08:41 (384 min, stage data only through 08:41);
+  true wake time was 09:41. Start 02:17 was correct as-is, only the end
+  needed +60 min — so `sync_sleep_to_supabase` gained an optional
+  `end_offsets` dict (`{"YYYY-MM-DD": minutes}`) that shifts only
+  `sleep_end`, applied on top of `offsets`.
+- The Zepp app's sleep chart shows a hatched final stretch (~60 min) that it
+  counts as sleep (app: 7:17 asleep for 02:17→09:41) but the API stage data
+  does not return. Row was hard-coded in Supabase: `total_minutes` 444 (app's
+  wall-clock span, repeated hour NOT counted), `actual_sleep_time` 437, and
+  the missing 60 min added to `light_minutes` (235 → 295) by choice, so
+  stage columns sum to `actual_sleep_time`. Treat that night's stage split and
+  avg sleep HR as approximate.
+- Winter time may remove the old "+60 on both boundaries" bug (it looked like
+  the tz field stuck on winter time during summer). Spot-check the first few
+  winter nights against the app before assuming either way.
+
 ### `data_hr` resolution — per-minute, not per-second (confirmed 2026-07-12)
 
 - The Zepp app's live Heart Rate chart appears to render per-second (or

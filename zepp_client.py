@@ -367,6 +367,7 @@ class ZeppClient:
         offsets: dict = None,
         start_date: str = None,
         end_date: str = None,
+        end_offsets: dict = None,
     ):
         """Upload sleep/HR/HybridCharge data to Supabase for explicitly
         confirmed dates only.
@@ -386,6 +387,9 @@ class ZeppClient:
                 correction pattern) before recomputing total duration and
                 avg sleep HR. Does NOT affect sleep_stages, whose raw
                 start/stop values are a separate, unaffected code path.
+            end_offsets: optional {"YYYY-MM-DD": minutes} dict. For a listed
+                date, shifts ONLY sleep_end (applied on top of `offsets`),
+                for nights where the start is right but the end is off.
             start_date/end_date: range to fetch from the API. If not given,
                 start_date defaults to min(confirmed_dates) — guaranteeing
                 the fetch window always covers every requested date,
@@ -398,6 +402,7 @@ class ZeppClient:
         if start_date is None:
             start_date = min(confirmed_dates) if confirmed_dates else (date.today() - timedelta(days=7)).isoformat()
         offsets = offsets or {}
+        end_offsets = end_offsets or {}
 
         records, detail_by_date = self._fetch_sleep_records(start_date, end_date)
 
@@ -425,6 +430,9 @@ class ZeppClient:
             if offset_min and st_ts and ed_ts:
                 st_ts += offset_min * 60
                 ed_ts += offset_min * 60
+            end_only_min = end_offsets.get(raw_date, 0)
+            if end_only_min and ed_ts:
+                ed_ts += end_only_min * 60
 
             avg_incl, avg_excl = self._compute_avg_sleep_hr(
                 raw_date, tz_info, st_ts, ed_ts, rec["hr_bytes"], rec["stages"]
